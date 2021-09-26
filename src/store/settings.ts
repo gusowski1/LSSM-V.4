@@ -52,7 +52,7 @@ export default {
     } as MutationTree<SettingsState>,
     actions: {
         saveSettings(
-            { commit, dispatch }: SettingsActionStoreParams,
+            { commit }: SettingsActionStoreParams,
             { settings }: SettingsSave
         ) {
             commit('save', settings);
@@ -111,14 +111,31 @@ export default {
                 })
             );
         },
-        getModule({ dispatch }: SettingsActionStoreParams, moduleId: string) {
-            return dispatch(
-                'storage/get',
-                { key: `settings_${moduleId}`, defaultValue: {} },
-                {
-                    root: true,
-                }
-            );
+        getModule(
+            { dispatch, state }: SettingsActionStoreParams,
+            moduleId: string
+        ) {
+            return new Promise(resolve => {
+                dispatch(
+                    'storage/get',
+                    { key: `settings_${moduleId}`, defaultValue: {} },
+                    {
+                        root: true,
+                    }
+                ).then(storage =>
+                    resolve({
+                        ...Object.fromEntries(
+                            Object.entries(
+                                state.settings[moduleId] ?? {}
+                            ).map(([key, { value, default: def }]) => [
+                                key,
+                                value ?? def,
+                            ])
+                        ),
+                        ...storage,
+                    })
+                );
+            });
         },
         setSetting(
             { commit, dispatch }: SettingsActionStoreParams,

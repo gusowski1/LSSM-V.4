@@ -125,6 +125,7 @@ import { faExpandAlt } from '@fortawesome/free-solid-svg-icons/faExpandAlt';
 import { faParagraph } from '@fortawesome/free-solid-svg-icons/faParagraph';
 import { faTable } from '@fortawesome/free-solid-svg-icons/faTable';
 
+import { InternalVehicle } from 'typings/Vehicle';
 import {
     EnhancedMissingVehicles,
     EnhancedMissingVehiclesComputed,
@@ -208,17 +209,28 @@ export default Vue.extend<
             ).sort((a, b) => {
                 let modifier = 1;
                 if (this.sortDir === 'desc') modifier = -1;
-                if (a[this.sort] < b[this.sort]) return -1 * modifier;
-                if (a[this.sort] > b[this.sort]) return modifier;
+                let left = a[this.sort];
+                if (typeof left !== 'number' && typeof left !== 'string')
+                    left = left.min;
+                let right = b[this.sort];
+                if (typeof right !== 'number' && typeof right !== 'string')
+                    right = right.min;
+                if (left < right) return -1 * modifier;
+                if (left > right) return modifier;
                 return 0;
             });
         },
         missingRequirementsCheck() {
             return this.requirements.every(
-                (req: { total: number; missing: number; selected: number }) => {
-                    if ((req.total ?? req.missing) <= req.selected) return true;
-                    else return false;
-                }
+                (req: {
+                    total: number;
+                    missing: number;
+                    selected: number | { min: number; max: number };
+                }) =>
+                    (req.total ?? req.missing) <=
+                    (typeof req.selected === 'number'
+                        ? req.selected
+                        : req.selected.min)
             );
         },
     },
@@ -361,66 +373,230 @@ export default Vue.extend<
                 defaultValue: false,
             })
             .then(hoverTip => (this.hoverTip = hoverTip));
+        this.$store
+            .dispatch('api/registerVehiclesUsage', { feature: 'emv' })
+            .then();
     },
     mounted() {
-        const vehicleGroups = (this.$m('vehiclesByRequirement') as unknown) as {
-            [group: string]: number[];
-        };
-        const water = this.$m('water').toString();
-        const foam = this.$m('foam').toString();
-        const categoriesById = {} as {
-            [id: number]: string[];
-        };
-        Object.entries(vehicleGroups).forEach(([group, ids]) => {
-            Object.values(ids).forEach(id => {
-                if (!categoriesById.hasOwnProperty(id)) categoriesById[id] = [];
-                categoriesById[id].push(group.replace(/(^\/)|(\/$)/g, ''));
-            });
-        });
-        const vehicleList = document.getElementById('vehicle_show_table_all');
-        if (!vehicleList) return;
-        const amountObserver = new MutationObserver(() => {
-            this.requirements.forEach(req => (req.selected = 0));
-            const waterReq = this.requirements.find(
-                ({ vehicle }) => vehicle === water
-            );
-            const foamReq = this.requirements.find(
-                ({ vehicle }) => vehicle === foam
-            );
-            if (waterReq) {
-                waterReq.selected = parseInt(
-                    document
-                        .querySelector<HTMLDivElement>(
-                            '[id^="mission_water_holder_"] div.progress-bar-mission-window-water.progress-bar-danger, [id^="mission_water_holder_"] div.progress-bar-mission-window-water.progress-bar-success'
-                        )
-                        ?.textContent?.match(/\d{1,3}(([,.]|\s)\d{3})*/)?.[0]
-                        ?.replace(/[,.]|\s/g, '') ?? '0'
+        const vehicleList = document.querySelector<HTMLTableSectionElement>(
+            '#vehicle_show_table_body_all'
+        );
+        const occupiedList = document.querySelector<HTMLDivElement>(
+            '#occupied'
+        );
+
+        const vehicleTypes = this.$t('vehicles') as Record<
+            number,
+            InternalVehicle
+        >;
+
+        if (!vehicleList || !occupiedList) return;
+
+        type GroupTranslation = Record<string, Record<number, number>>;
+
+        const getRequirementsByIDs = (translations: GroupTranslation) => {
+            const requirements: Record<
+                number,
+                EnhancedMissingVehiclesProps['missingRequirements']
+            > = {};
+
+            Object.entries(translations).forEach(([reg, vehicles]) => {
+                const regex = new RegExp(reg.replace(/^\/|\/$/g, ''));
+                const requirement = (this
+                    .missingRequirements as EnhancedMissingVehiclesProps['missingRequirements']).find(
+                    ({ vehicle }) => vehicle.match(regex)
                 );
-            }
-            if (foamReq) {
-                foamReq.selected = parseInt(
-                    document
-                        .querySelector<HTMLDivElement>(
-                            '[id^="mission_foam_holder_"] div.progress-bar-mission-window-water.progress-bar-danger, [id^="mission_foam_holder_"] div.progress-bar-mission-window-water.progress-bar-success'
-                        )
-                        ?.textContent?.match(/\d{1,3}(([,.]|\s)\d{3})*/)?.[0]
-                        ?.replace(/[,.]|\s/g, '') ?? '0'
-                );
-            }
-            vehicleList
-                .querySelectorAll<HTMLInputElement>('.vehicle_checkbox:checked')
-                .forEach(vehicle => {
-                    categoriesById[
-                        parseInt(
-                            vehicle.getAttribute('vehicle_type_id') || '-1'
-                        )
-                    ]?.forEach(group => {
-                        const req = this.requirements.find(({ vehicle }) =>
-                            vehicle.match(new RegExp(group))
-                        );
-                        if (req) this.$set(req, 'selected', req.selected + 1);
+                if (requirement) {
+                    Object.values(vehicles).forEach(vehicle => {
+                        if (!requirements.hasOwnProperty(vehicle))
+                            requirements[vehicle] = [];
+                        requirements[vehicle].push(requirement);
                     });
-                });
+                }
+            });
+            return requirements;
+        };
+
+        const getSpecialRequirement = (requirement: string) =>
+            this.requirements.find(({ vehicle }) =>
+                vehicle.match(
+                    new RegExp(
+                        this.$m(requirement)
+                            .toString()
+                            .replace(/^\/|\/$/g, '')
+                    )
+                )
+            );
+
+        const requirementsByVehicleID = getRequirementsByIDs(
+            (this.$m('vehiclesByRequirement') as unknown) as GroupTranslation
+        );
+        const staffByVehicleID = getRequirementsByIDs(
+            (this.$m('staff') as unknown) as GroupTranslation
+        );
+
+        const towingVehicles = (this.$m('towingVehicles') as unknown) as Record<
+            number,
+            Record<number, number>
+        >;
+
+        const specialRequirementList = ['water', 'foam'];
+
+        const specialRequirements: Record<
+            string,
+            EnhancedMissingVehiclesProps['missingRequirements'][0]
+        > = Object.fromEntries(
+            specialRequirementList
+                .map(req => [req, getSpecialRequirement(req)])
+                .filter(([, req]) => req)
+        );
+
+        const getProgressBarSelected = (requirement: string) =>
+            this.$utils.getNumberFromText(
+                document.querySelector<HTMLDivElement>(
+                    `[id^="mission_${requirement}_holder_"] div[class*="mission_water_bar_selected"]`
+                )?.textContent ?? '',
+                false,
+                0
+            );
+
+        const amountObserver = new MutationObserver(() => {
+            const selectedVehicles: Record<number, number[]> = {};
+            const definiteTractives: Record<number, number> = {};
+            const possibleTractives: Record<number, number> = {};
+
+            [
+                ...vehicleList.querySelectorAll<HTMLInputElement>(
+                    '.vehicle_checkbox:checked'
+                ),
+                ...occupiedList.querySelectorAll<HTMLInputElement>(
+                    '.vehicle_checkbox:checked'
+                ),
+            ].forEach(checkbox => {
+                const vehicleType = parseInt(
+                    checkbox.getAttribute('vehicle_type_id') ?? '-1'
+                );
+                const vehicleID = parseInt(
+                    checkbox.getAttribute('value') ?? '-1'
+                );
+                if (vehicleType < 0 || vehicleID < 0) return;
+
+                if (!selectedVehicles.hasOwnProperty(vehicleType))
+                    selectedVehicles[vehicleType] = [];
+                selectedVehicles[vehicleType].push(vehicleID);
+
+                const tractiveVehicleID = checkbox.getAttribute(
+                    'tractive_vehicle_id'
+                );
+                let tractiveCounted = false;
+                if (
+                    tractiveVehicleID &&
+                    checkbox.getAttribute('tractive_random') === '0' &&
+                    tractiveVehicleID !== '0'
+                ) {
+                    const tractive = this.$store.getters['api/vehicle'](
+                        parseInt(tractiveVehicleID)
+                    );
+                    const tractiveType = tractive.vehicle_type;
+                    if (tractive) {
+                        if (!selectedVehicles.hasOwnProperty(tractiveType))
+                            selectedVehicles[tractiveType] = [];
+                        selectedVehicles[tractiveType].push(
+                            parseInt(tractiveVehicleID)
+                        );
+                        if (!definiteTractives.hasOwnProperty(tractiveType))
+                            definiteTractives[tractiveType] = 0;
+                        definiteTractives[tractiveType]++;
+                        tractiveCounted = true;
+                    }
+                }
+                if (
+                    !tractiveCounted &&
+                    towingVehicles.hasOwnProperty(vehicleType)
+                ) {
+                    const tractiveType = towingVehicles[vehicleType][0];
+                    if (!possibleTractives.hasOwnProperty(tractiveType))
+                        possibleTractives[tractiveType] = 0;
+                    possibleTractives[tractiveType]++;
+                }
+            });
+
+            this.requirements.forEach(requirement =>
+                this.$set(
+                    requirement,
+                    'selected',
+                    typeof requirement.selected === 'number'
+                        ? 0
+                        : { min: 0, max: 0 }
+                )
+            );
+
+            Object.entries(possibleTractives).forEach(
+                ([tractiveType, amount]) => {
+                    const type = parseInt(tractiveType);
+                    if (!selectedVehicles.hasOwnProperty(type))
+                        selectedVehicles[type] = [];
+                    while (
+                        selectedVehicles[type].length <
+                        amount + (definiteTractives[type] ?? 0)
+                    ) {
+                        selectedVehicles[type].push(
+                            selectedVehicles[type].length * -1
+                        );
+                    }
+                }
+            );
+            Object.entries(selectedVehicles).forEach(
+                ([vehicleType, vehicles]) => {
+                    const vehicleIds = [...new Set(vehicles)];
+
+                    requirementsByVehicleID[
+                        parseInt(vehicleType)
+                    ]?.forEach(requirement =>
+                        this.$set(
+                            requirement,
+                            'selected',
+                            typeof requirement.selected === 'number'
+                                ? requirement.selected + vehicleIds.length
+                                : requirement.selected
+                        )
+                    );
+
+                    const type = vehicleTypes[parseInt(vehicleType)];
+
+                    staffByVehicleID[parseInt(vehicleType)]?.forEach(
+                        requirement => {
+                            this.$set(
+                                requirement,
+                                'selected',
+                                typeof requirement.selected === 'number'
+                                    ? requirement.selected + 1
+                                    : {
+                                          min:
+                                              requirement.selected.min +
+                                              type.minPersonnel *
+                                                  vehicleIds.length,
+                                          max:
+                                              requirement.selected.max +
+                                              vehicleIds
+                                                  .map(
+                                                      id =>
+                                                          this.$store.getters[
+                                                              'api/vehicle'
+                                                          ](id)
+                                                              ?.max_personnel_override ??
+                                                          type.maxPersonnel
+                                                  )
+                                                  .reduce((a, b) => a + b, 0),
+                                      }
+                            );
+                        }
+                    );
+                }
+            );
+            Object.entries(specialRequirements).forEach(([key, requirement]) =>
+                this.$set(requirement, 'selected', getProgressBarSelected(key))
+            );
         });
         const amountElement = document.getElementById('vehicle_amount');
 

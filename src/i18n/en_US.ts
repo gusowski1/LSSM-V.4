@@ -1,6 +1,5 @@
 // import { Building } from 'typings/Building';
 
-const furtherFiles = require.context('./en_US/', true, /.*(\/index)?\.js(on)?/);
 const modules = {
     appstore: {
         save: 'Save',
@@ -25,6 +24,14 @@ const modules = {
         reset: 'Reset',
         export: 'Export',
         import: 'Import',
+        appendableList: {
+            unique: {
+                title: 'double value',
+                text:
+                    'There must be no duplicate values in the **{title}** column. The value **{value}** already exists!',
+                confirm: 'OK',
+            },
+        },
         resetWarning: {
             title: 'Reset the settings',
             text:
@@ -55,17 +62,8 @@ const modules = {
     },
 } as { [moduleId: string]: { [key: string]: unknown } };
 
-const t = {} as { [key: string]: unknown };
-
-furtherFiles
-    .keys()
-    .forEach(
-        key => (t[key.split('/')[1].replace(/\..*$/, '')] = furtherFiles(key))
-    );
-
 export default {
     modules,
-    ...t,
     error: {
         title: 'LSS Manager: Error',
         msg:

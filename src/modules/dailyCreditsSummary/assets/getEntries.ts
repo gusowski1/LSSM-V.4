@@ -16,7 +16,16 @@ export default async (
     })) as Mission[];
 
     const missionsString = missions
-        .map(({ name }) => LSSM.$utils.escapeRegex(name))
+        .flatMap(({ name, alternate_version }) =>
+            alternate_version
+                ? [
+                      LSSM.$utils.escapeRegex(name),
+                      LSSM.$utils.escapeRegex(
+                          alternate_version.mission_type.name
+                      ),
+                  ]
+                : LSSM.$utils.escapeRegex(name)
+        )
         .join('|');
 
     const credits_types: CreditsTypes = (
@@ -59,12 +68,7 @@ export default async (
     ]);
 
     const getNum = (el: Element | null) =>
-        parseInt(
-            el?.textContent
-                ?.trim()
-                .match(/-?\d{1,3}(([,.]|\s)\d{3})*/)?.[0]
-                ?.replace(/[,.]|\s/g, '') ?? '0'
-        );
+        LSSM.$utils.getNumberFromText(el?.textContent?.trim() ?? '', false, 0);
 
     return {
         entries: Array.from(

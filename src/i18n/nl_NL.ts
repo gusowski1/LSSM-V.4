@@ -1,6 +1,5 @@
-import { Building } from 'typings/Building';
+import { Building } from '../../typings/Building';
 
-const furtherFiles = require.context('./nl_NL/', true, /.*(\/index)?\.js(on)?/);
 const modules = {
     appstore: {
         save: 'Opslaan',
@@ -25,6 +24,14 @@ const modules = {
         reset: 'Reset',
         export: 'Exporteer',
         import: 'Importeer',
+        appendableList: {
+            unique: {
+                title: 'Dubbele waarde',
+                text:
+                    'Er mag geen dubbele waarde zijn in de **{title}** kolom. De waarde **{value}** bestaat al!',
+                confirm: 'OK',
+            },
+        },
         resetWarning: {
             title: 'Reset de instellingen',
             text:
@@ -55,17 +62,8 @@ const modules = {
     },
 } as { [moduleId: string]: { [key: string]: unknown } };
 
-const t = {} as { [key: string]: unknown };
-
-furtherFiles
-    .keys()
-    .forEach(
-        key => (t[key.split('/')[1].replace(/\..*$/, '')] = furtherFiles(key))
-    );
-
 export default {
     modules,
-    ...t,
     error: {
         title: 'LSS Manager: Error',
         msg:
